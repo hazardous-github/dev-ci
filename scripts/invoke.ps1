@@ -83,7 +83,7 @@ try {
 
     # Deliberately capture private dispatcher output. Public logs receive only
     # the generic final status.
-    $privateOutput = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Target $Target -Revision $Revision -Suite $Suite -RunId $RunId 2>&1 | Out-String
+    $privateOutput = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Target $Target -Revision $Revision -Suite $Suite -RunId $RunId *>&1 | Out-String
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {
