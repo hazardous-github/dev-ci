@@ -17,3 +17,5 @@ Request shape:
 ```
 
 Public workflow output is intentionally limited to generic bootstrap status and PASS/FAIL. Do not add project names, private repository names, private build commands, or detailed test output here.
+
+GitHub Actions logs for this public repository are public. The harness therefore captures the private dispatcher and target-process output instead of streaming it to the job log. A public run should expose only generic harness messages and final status; detailed failure diagnostics are written to a private sink by the private control plane.
