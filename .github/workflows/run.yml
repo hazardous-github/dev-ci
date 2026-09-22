@@ -1,0 +1,62 @@
+name: Validation
+run-name: Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'requests/*.json'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Opaque target identifier
+        required: true
+        type: string
+      revision:
+        description: Exact 40-character source commit SHA
+        required: true
+        type: string
+      suite:
+        description: Opaque validation suite identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run validation
+        shell: pwsh
+        env:
+          DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
+          DEV_CI_READ_TOKEN: ${{ secrets.DEV_CI_READ_TOKEN }}
+          DEV_CI_RESULTS_TOKEN: ${{ secrets.DEV_CI_RESULTS_TOKEN }}
+          DEV_CI_EVENT_NAME: ${{ github.event_name }}
+          DEV_CI_RUN_ID: ${{ github.run_id }}
+          DEV_CI_INPUT_TARGET: ${{ inputs.target }}
+          DEV_CI_INPUT_REVISION: ${{ inputs.revision }}
+          DEV_CI_INPUT_SUITE: ${{ inputs.suite }}
+        run: |
+          if ($env:DEV_CI_EVENT_NAME -eq 'push') {
+              $requestPaths = @(
+                  git diff-tree --no-commit-id --name-only -r $env:GITHUB_SHA |
+                      Where-Object { $_ -like 'requests/*.json' }
+              )
+
+              if ($requestPaths.Count -ne 1) {
+                  throw 'A CI request commit must add or change exactly one request JSON file.'
+              }
+
+              ./scripts/invoke.ps1 -RequestPath $requestPaths[0] -RunId $env:DEV_CI_RUN_ID
+          }
+          else {
+              ./scripts/invoke.ps1 -Target $env:DEV_CI_INPUT_TARGET -Revision $env:DEV_CI_INPUT_REVISION -Suite $env:DEV_CI_INPUT_SUITE -RunId $env:DEV_CI_RUN_ID
+          }
