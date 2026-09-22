@@ -51,10 +51,10 @@ if ($RunId -notmatch '^[0-9]+$') {
 }
 
 $controlRepository = [string]$env:DEV_CI_CONTROL_REPOSITORY
-$readToken = [string]$env:DEV_CI_READ_TOKEN
+$token = [string]$env:DEV_CI_TOKEN
 
 if ([string]::IsNullOrWhiteSpace($controlRepository) -or
-    [string]::IsNullOrWhiteSpace($readToken)) {
+    [string]::IsNullOrWhiteSpace($token)) {
     throw 'CI control credentials are not configured.'
 }
 
@@ -66,7 +66,7 @@ else {
 }
 
 $controlRoot = Join-Path $runnerTemp ('dev-ci-control-' + [guid]::NewGuid().ToString('N'))
-$authBytes = [System.Text.Encoding]::ASCII.GetBytes("x-access-token:$readToken")
+$authBytes = [System.Text.Encoding]::ASCII.GetBytes("x-access-token:$token")
 $authHeader = [Convert]::ToBase64String($authBytes)
 $controlUrl = "https://github.com/$controlRepository.git"
 
