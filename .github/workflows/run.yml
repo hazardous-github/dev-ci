@@ -38,8 +38,7 @@ jobs:
         shell: pwsh
         env:
           DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
-          DEV_CI_READ_TOKEN: ${{ secrets.DEV_CI_READ_TOKEN }}
-          DEV_CI_RESULTS_TOKEN: ${{ secrets.DEV_CI_RESULTS_TOKEN }}
+          DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
           DEV_CI_EVENT_NAME: ${{ github.event_name }}
           DEV_CI_RUN_ID: ${{ github.run_id }}
           DEV_CI_INPUT_TARGET: ${{ inputs.target }}
