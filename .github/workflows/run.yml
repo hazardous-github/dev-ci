@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 2
 
       - name: Run validation
         shell: pwsh
@@ -51,6 +52,12 @@ jobs:
                       Where-Object { $_ -like 'requests/*.json' }
               )
 
+              $requestPaths = @($requestPaths | Where-Object { Test-Path -LiteralPath $_ })
+
+              if ($requestPaths.Count -eq 0) {
+                  Write-Host 'No runnable request.'
+                  exit 0
+              }
               if ($requestPaths.Count -ne 1) {
                   throw 'A CI request commit must add or change exactly one request JSON file.'
               }
