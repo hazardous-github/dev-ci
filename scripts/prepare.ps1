@@ -77,29 +77,30 @@ if ($null -eq $suiteConfig) {
     throw 'Unknown CI suite.'
 }
 
-$planner = Join-Path $controlRoot 'dev-ci\cache-plan.ps1'
-if (-not (Test-Path -LiteralPath $planner -PathType Leaf)) {
-    throw 'Private CI cache planner was not found.'
-}
-
-$planOutput = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $planner -Target $Target -Suite $Suite *>&1 | Out-String
-if ($LASTEXITCODE -ne 0) {
-    throw 'Private CI cache planning failed.'
-}
-
-$cacheKey = $planOutput.Trim()
-if (-not [string]::IsNullOrWhiteSpace($cacheKey) -and
-    $cacheKey -notmatch '^[A-Za-z0-9._-]{1,512}$') {
-    throw 'Private CI cache planner returned an invalid key.'
-}
-
 "control-root=$controlRoot" | Out-File -FilePath $outputPath -Encoding utf8 -Append
 "use-runner-dotnet=$(([bool]$suiteConfig.UseRunnerDotNet).ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
 
-if ([string]::IsNullOrWhiteSpace($cacheKey)) {
-    'cache-enabled=false' | Out-File -FilePath $outputPath -Encoding utf8 -Append
-}
-else {
-    'cache-enabled=true' | Out-File -FilePath $outputPath -Encoding utf8 -Append
-    "cache-key=$cacheKey" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+$pluginCompileCache = [bool]$suiteConfig.PluginCompileCache
+"plugin-cache-enabled=$($pluginCompileCache.ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+
+if ($pluginCompileCache) {
+    . (Join-Path $controlRoot 'dev-ci\cache-common.ps1')
+
+    $managedDependency = @(
+        $suiteConfig.Dependencies |
+            Where-Object { [string]$_.EnvironmentVariable -eq 'EL2_CI_MANAGED_RUNTIME' }
+    )
+    if ($managedDependency.Count -ne 1) {
+        throw 'Plugin compile cache requires exactly one EL2 managed-runtime dependency.'
+    }
+
+    $managedRuntimeRevision = Resolve-CiDependencyRevision `
+        -Definition $managedDependency[0] `
+        -AuthHeader $authHeader
+
+    if ($managedRuntimeRevision -notmatch '^[0-9a-f]{40}$') {
+        throw 'Managed-runtime dependency did not resolve to a commit.'
+    }
+
+    "managed-runtime-revision=$managedRuntimeRevision" | Out-File -FilePath $outputPath -Encoding utf8 -Append
 }
