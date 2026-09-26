@@ -18,6 +18,29 @@ function Assert-OpaqueIdentifier {
     }
 }
 
+function Get-PrivateControlFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$ControlRevision,
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)]$Headers
+    )
+
+    $escapedPath = ($RelativePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+    $uri = "https://api.github.com/repos/$Repository/contents/$escapedPath?ref=$ControlRevision"
+    $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Headers
+
+    if ([string]$response.type -ne 'file' -or
+        [string]$response.encoding -ne 'base64' -or
+        [string]::IsNullOrWhiteSpace([string]$response.content)) {
+        throw 'Private control bundle contained an invalid file response.'
+    }
+
+    $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
+    [System.IO.File]::WriteAllBytes($Destination, $bytes)
+}
+
 Assert-OpaqueIdentifier -Value $Target -Name 'target'
 Assert-OpaqueIdentifier -Value $Suite -Name 'suite'
 
@@ -45,62 +68,90 @@ else {
 }
 
 $controlRoot = Join-Path $runnerTemp ('dev-ci-control-' + [guid]::NewGuid().ToString('N'))
+$controlDirectory = Join-Path $controlRoot 'dev-ci'
+$headers = @{
+    Authorization = "Bearer $token"
+    Accept = 'application/vnd.github+json'
+    'X-GitHub-Api-Version' = '2022-11-28'
+}
 $authBytes = [System.Text.Encoding]::ASCII.GetBytes("x-access-token:$token")
 $authHeader = [Convert]::ToBase64String($authBytes)
-$controlUrl = "https://github.com/$controlRepository.git"
 
-$cloneOutput = & git -c "http.extraheader=AUTHORIZATION: basic $authHeader" clone --quiet --depth 1 $controlUrl $controlRoot 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw 'Private control checkout failed.'
-}
+try {
+    New-Item -ItemType Directory -Force -Path $controlDirectory | Out-Null
 
-$config = Import-PowerShellDataFile -LiteralPath (Join-Path $controlRoot 'dev-ci\config.psd1')
-$targetConfig = $config.Targets[$Target]
-if ($null -eq $targetConfig) {
-    throw 'Unknown CI target.'
-}
+    $revisionResponse = Invoke-RestMethod `
+        -Method Get `
+        -Uri "https://api.github.com/repos/$controlRepository/commits/main" `
+        -Headers $headers
+    $controlRevision = [string]$revisionResponse.sha
+    if ($controlRevision -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Private control revision could not be resolved.'
+    }
 
-$suiteConfig = $null
-foreach ($entry in $targetConfig.Suites.GetEnumerator()) {
-    if ([string]::Equals(
-        [string]$entry.Value.PublicId,
-        $Suite,
-        [System.StringComparison]::Ordinal
-    )) {
-        if ($null -ne $suiteConfig) {
-            throw 'Duplicate public CI suite identifier.'
+    foreach ($fileName in @('config.psd1', 'cache-common.ps1', 'invoke.ps1')) {
+        Get-PrivateControlFile `
+            -Repository $controlRepository `
+            -ControlRevision $controlRevision `
+            -RelativePath "dev-ci/$fileName" `
+            -Destination (Join-Path $controlDirectory $fileName) `
+            -Headers $headers
+    }
+
+    $config = Import-PowerShellDataFile -LiteralPath (Join-Path $controlDirectory 'config.psd1')
+    $targetConfig = $config.Targets[$Target]
+    if ($null -eq $targetConfig) {
+        throw 'Unknown CI target.'
+    }
+
+    $suiteConfig = $null
+    foreach ($entry in $targetConfig.Suites.GetEnumerator()) {
+        if ([string]::Equals(
+            [string]$entry.Value.PublicId,
+            $Suite,
+            [System.StringComparison]::Ordinal
+        )) {
+            if ($null -ne $suiteConfig) {
+                throw 'Duplicate public CI suite identifier.'
+            }
+            $suiteConfig = $entry.Value
         }
-        $suiteConfig = $entry.Value
+    }
+    if ($null -eq $suiteConfig) {
+        throw 'Unknown CI suite.'
+    }
+
+    "control-root=$controlRoot" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+    "use-runner-dotnet=$(([bool]$suiteConfig.UseRunnerDotNet).ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+
+    $pluginCompileCache = [bool]$suiteConfig.PluginCompileCache
+    "plugin-cache-enabled=$($pluginCompileCache.ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+
+    if ($pluginCompileCache) {
+        . (Join-Path $controlDirectory 'cache-common.ps1')
+
+        $managedDependency = @(
+            $suiteConfig.Dependencies |
+                Where-Object { [string]$_.EnvironmentVariable -eq 'EL2_CI_MANAGED_RUNTIME' }
+        )
+        if ($managedDependency.Count -ne 1) {
+            throw 'Plugin compile cache requires exactly one EL2 managed-runtime dependency.'
+        }
+
+        $managedRuntimeRevision = Resolve-CiDependencyRevision `
+            -Definition $managedDependency[0] `
+            -AuthHeader $authHeader
+
+        if ($managedRuntimeRevision -notmatch '^[0-9a-f]{40}$') {
+            throw 'Managed-runtime dependency did not resolve to a commit.'
+        }
+
+        "managed-runtime-revision=$managedRuntimeRevision" | Out-File -FilePath $outputPath -Encoding utf8 -Append
     }
 }
-if ($null -eq $suiteConfig) {
-    throw 'Unknown CI suite.'
-}
-
-"control-root=$controlRoot" | Out-File -FilePath $outputPath -Encoding utf8 -Append
-"use-runner-dotnet=$(([bool]$suiteConfig.UseRunnerDotNet).ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
-
-$pluginCompileCache = [bool]$suiteConfig.PluginCompileCache
-"plugin-cache-enabled=$($pluginCompileCache.ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
-
-if ($pluginCompileCache) {
-    . (Join-Path $controlRoot 'dev-ci\cache-common.ps1')
-
-    $managedDependency = @(
-        $suiteConfig.Dependencies |
-            Where-Object { [string]$_.EnvironmentVariable -eq 'EL2_CI_MANAGED_RUNTIME' }
-    )
-    if ($managedDependency.Count -ne 1) {
-        throw 'Plugin compile cache requires exactly one EL2 managed-runtime dependency.'
+catch {
+    if (Test-Path -LiteralPath $controlRoot) {
+        Remove-Item -LiteralPath $controlRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
-
-    $managedRuntimeRevision = Resolve-CiDependencyRevision `
-        -Definition $managedDependency[0] `
-        -AuthHeader $authHeader
-
-    if ($managedRuntimeRevision -notmatch '^[0-9a-f]{40}$') {
-        throw 'Managed-runtime dependency did not resolve to a commit.'
-    }
-
-    "managed-runtime-revision=$managedRuntimeRevision" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+    throw
 }
