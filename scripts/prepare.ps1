@@ -54,6 +54,29 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Private control checkout failed.'
 }
 
+$config = Import-PowerShellDataFile -LiteralPath (Join-Path $controlRoot 'dev-ci\config.psd1')
+$targetConfig = $config.Targets[$Target]
+if ($null -eq $targetConfig) {
+    throw 'Unknown CI target.'
+}
+
+$suiteConfig = $null
+foreach ($entry in $targetConfig.Suites.GetEnumerator()) {
+    if ([string]::Equals(
+        [string]$entry.Value.PublicId,
+        $Suite,
+        [System.StringComparison]::Ordinal
+    )) {
+        if ($null -ne $suiteConfig) {
+            throw 'Duplicate public CI suite identifier.'
+        }
+        $suiteConfig = $entry.Value
+    }
+}
+if ($null -eq $suiteConfig) {
+    throw 'Unknown CI suite.'
+}
+
 $planner = Join-Path $controlRoot 'dev-ci\cache-plan.ps1'
 if (-not (Test-Path -LiteralPath $planner -PathType Leaf)) {
     throw 'Private CI cache planner was not found.'
@@ -71,6 +94,8 @@ if (-not [string]::IsNullOrWhiteSpace($cacheKey) -and
 }
 
 "control-root=$controlRoot" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+"use-runner-dotnet=$(([bool]$suiteConfig.UseRunnerDotNet).ToString().ToLowerInvariant())" | Out-File -FilePath $outputPath -Encoding utf8 -Append
+
 if ([string]::IsNullOrWhiteSpace($cacheKey)) {
     'cache-enabled=false' | Out-File -FilePath $outputPath -Encoding utf8 -Append
 }
