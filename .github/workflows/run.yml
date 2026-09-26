@@ -27,6 +27,10 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
+    env:
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
     steps:
       - name: Resolve request
         id: request
@@ -125,12 +129,12 @@ jobs:
         with:
           dotnet-version: '10.0.400'
 
-      - name: Restore BepInEx 5.4.23.5
+      - name: Restore expanded BepInEx 5.4.23.5 core
         if: steps.control.outputs.plugin-cache-enabled == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}\dev-ci-cache\bepinex\win-x64\5.4.23.5
-          key: el2-plugin-bepinex-win-x64-5.4.23.5-sha256-82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
+          key: el2-plugin-bepinex-core-win-x64-5.4.23.5-sha256-82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
 
       - name: Restore EL2 managed runtime
         if: steps.control.outputs.plugin-cache-enabled == 'true'
