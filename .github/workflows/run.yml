@@ -125,14 +125,14 @@ jobs:
         if: steps.control.outputs.plugin-cache-enabled == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\dev-ci-cache\bepinex-5.4.23.5
+          path: ${{ runner.temp }}\dev-ci-cache\bepinex\win-x64\5.4.23.5
           key: el2-plugin-bepinex-win-x64-5.4.23.5-sha256-82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
 
       - name: Restore EL2 managed runtime
         if: steps.control.outputs.plugin-cache-enabled == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\dev-ci-cache\managed-runtime
+          path: ${{ runner.temp }}\dev-ci-cache\dependencies
           key: el2-plugin-managed-runtime-${{ steps.control.outputs.managed-runtime-revision }}
 
       - name: Run validation
@@ -143,8 +143,7 @@ jobs:
           DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
           DEV_CI_RUN_ID: ${{ github.run_id }}
           DEV_CI_HARNESS_ROOT: ${{ steps.request.outputs.harness-root }}
-          EL2_CI_BEPINEX_CACHE_DIR: ${{ runner.temp }}\dev-ci-cache\bepinex-5.4.23.5
-          EL2_CI_MANAGED_RUNTIME_CACHE_DIR: ${{ runner.temp }}\dev-ci-cache\managed-runtime
+          DEV_CI_INPUT_CACHE_ROOT: ${{ runner.temp }}\dev-ci-cache
           EL2_CI_MANAGED_RUNTIME_REVISION: ${{ steps.control.outputs.managed-runtime-revision }}
         run: |
           & (Join-Path $env:DEV_CI_HARNESS_ROOT 'invoke.ps1') `
