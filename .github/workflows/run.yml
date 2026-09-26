@@ -27,9 +27,6 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
-    env:
-      DOTNET_INSTALL_DIR: ${{ runner.temp }}\dev-ci-dotnet
-      DEV_CI_INPUT_CACHE_ROOT: ${{ runner.temp }}\dev-ci-input-cache
     steps:
       - name: Checkout harness
         uses: actions/checkout@v4
@@ -101,12 +98,14 @@ jobs:
         if: steps.request.outputs.runnable == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ env.DOTNET_INSTALL_DIR }}
+          path: ${{ runner.temp }}\dev-ci-dotnet
           key: dev-ci-dotnet-v1-${{ runner.os }}-${{ runner.arch }}-10.0.400
 
       - name: Set up .NET
         if: steps.request.outputs.runnable == 'true'
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dev-ci-dotnet
         with:
           dotnet-version: '10.0.400'
 
@@ -114,7 +113,7 @@ jobs:
         if: steps.control.outputs.cache-enabled == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ env.DEV_CI_INPUT_CACHE_ROOT }}
+          path: ${{ runner.temp }}\dev-ci-input-cache
           key: ${{ steps.control.outputs.cache-key }}
 
       - name: Run validation
@@ -124,6 +123,7 @@ jobs:
           DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
           DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
           DEV_CI_RUN_ID: ${{ github.run_id }}
+          DEV_CI_INPUT_CACHE_ROOT: ${{ runner.temp }}\dev-ci-input-cache
         run: |
           ./scripts/invoke.ps1 `
               -Target '${{ steps.request.outputs.target }}' `
