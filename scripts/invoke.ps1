@@ -13,7 +13,9 @@ param(
     [string]$Suite,
 
     [Parameter(Mandatory = $true)]
-    [string]$RunId
+    [string]$RunId,
+
+    [string]$ControlRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,18 +67,24 @@ else {
     $env:RUNNER_TEMP
 }
 
-$controlRoot = Join-Path $runnerTemp ('dev-ci-control-' + [guid]::NewGuid().ToString('N'))
-$authBytes = [System.Text.Encoding]::ASCII.GetBytes("x-access-token:$token")
-$authHeader = [Convert]::ToBase64String($authBytes)
-$controlUrl = "https://github.com/$controlRepository.git"
+$ownsControlRoot = [string]::IsNullOrWhiteSpace($ControlRoot)
+if ($ownsControlRoot) {
+    $ControlRoot = Join-Path $runnerTemp ('dev-ci-control-' + [guid]::NewGuid().ToString('N'))
+    $authBytes = [System.Text.Encoding]::ASCII.GetBytes("x-access-token:$token")
+    $authHeader = [Convert]::ToBase64String($authBytes)
+    $controlUrl = "https://github.com/$controlRepository.git"
 
-try {
-    $cloneOutput = & git -c "http.extraheader=AUTHORIZATION: basic $authHeader" clone --quiet --depth 1 $controlUrl $controlRoot 2>&1
+    $cloneOutput = & git -c "http.extraheader=AUTHORIZATION: basic $authHeader" clone --quiet --depth 1 $controlUrl $ControlRoot 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw 'Private control checkout failed.'
     }
+}
+elseif (-not (Test-Path -LiteralPath $ControlRoot -PathType Container)) {
+    throw 'Prepared private control checkout was not found.'
+}
 
-    $dispatcher = Join-Path $controlRoot 'dev-ci\invoke.ps1'
+try {
+    $dispatcher = Join-Path $ControlRoot 'dev-ci\invoke.ps1'
     if (-not (Test-Path -LiteralPath $dispatcher -PathType Leaf)) {
         throw 'Private CI dispatcher was not found.'
     }
@@ -95,7 +103,7 @@ try {
     exit $exitCode
 }
 finally {
-    if (Test-Path -LiteralPath $controlRoot) {
-        Remove-Item -LiteralPath $controlRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($ownsControlRoot -and (Test-Path -LiteralPath $ControlRoot)) {
+        Remove-Item -LiteralPath $ControlRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
