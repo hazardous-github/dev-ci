@@ -28,12 +28,6 @@ jobs:
   validate:
     runs-on: windows-latest
     steps:
-      - name: Checkout harness
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 2
-
       - name: Resolve request
         id: request
         shell: pwsh
@@ -43,23 +37,39 @@ jobs:
           DEV_CI_INPUT_REVISION: ${{ inputs.revision }}
           DEV_CI_INPUT_SUITE: ${{ inputs.suite }}
         run: |
-          if ($env:DEV_CI_EVENT_NAME -eq 'push') {
-              $requestPaths = @(
-                  git diff-tree --no-commit-id --name-only -r $env:GITHUB_SHA |
-                      Where-Object { $_ -like 'requests/*.json' }
-              )
+          $harnessRoot = Join-Path $env:RUNNER_TEMP 'dev-ci-harness'
+          New-Item -ItemType Directory -Force -Path $harnessRoot | Out-Null
 
-              $requestPaths = @($requestPaths | Where-Object { Test-Path -LiteralPath $_ })
+          $rawRoot = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA"
+          foreach ($scriptName in @('prepare.ps1', 'invoke.ps1')) {
+              Invoke-WebRequest `
+                  -Uri "$rawRoot/scripts/$scriptName" `
+                  -OutFile (Join-Path $harnessRoot $scriptName)
+          }
+
+          if ($env:DEV_CI_EVENT_NAME -eq 'push') {
+              $eventPayload = Get-Content -Raw -LiteralPath $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+              $requestPaths = @(
+                  foreach ($commit in @($eventPayload.commits)) {
+                      foreach ($path in @($commit.added) + @($commit.modified)) {
+                          if ([string]$path -like 'requests/*.json') {
+                              [string]$path
+                          }
+                      }
+                  }
+              ) | Sort-Object -Unique
 
               if ($requestPaths.Count -eq 0) {
                   'runnable=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
                   exit 0
               }
-              if ($requestPaths.Count -ne 1) {
-                  throw 'A CI request commit must add or change exactly one request JSON file.'
+              if ($requestPaths.Count -ne 1 -or
+                  $requestPaths[0] -notmatch '^requests/[A-Za-z0-9._-]+\.json$') {
+                  throw 'A CI request push must add or change exactly one valid request JSON file.'
               }
 
-              $request = Get-Content -Raw -LiteralPath $requestPaths[0] | ConvertFrom-Json
+              $requestText = (Invoke-WebRequest -Uri "$rawRoot/$($requestPaths[0])").Content
+              $request = $requestText | ConvertFrom-Json
               $target = [string]$request.target
               $revision = [string]$request.revision
               $suite = [string]$request.suite
@@ -80,6 +90,7 @@ jobs:
           "target=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "revision=$revision" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "suite=$suite" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "harness-root=$harnessRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Prepare control plane
         id: control
@@ -88,8 +99,9 @@ jobs:
         env:
           DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
           DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
+          DEV_CI_HARNESS_ROOT: ${{ steps.request.outputs.harness-root }}
         run: |
-          ./scripts/prepare.ps1 `
+          & (Join-Path $env:DEV_CI_HARNESS_ROOT 'prepare.ps1') `
               -Target '${{ steps.request.outputs.target }}' `
               -Revision '${{ steps.request.outputs.revision }}' `
               -Suite '${{ steps.request.outputs.suite }}'
@@ -124,8 +136,9 @@ jobs:
           DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
           DEV_CI_RUN_ID: ${{ github.run_id }}
           DEV_CI_INPUT_CACHE_ROOT: ${{ runner.temp }}\dev-ci-input-cache
+          DEV_CI_HARNESS_ROOT: ${{ steps.request.outputs.harness-root }}
         run: |
-          ./scripts/invoke.ps1 `
+          & (Join-Path $env:DEV_CI_HARNESS_ROOT 'invoke.ps1') `
               -Target '${{ steps.request.outputs.target }}' `
               -Revision '${{ steps.request.outputs.revision }}' `
               -Suite '${{ steps.request.outputs.suite }}' `
