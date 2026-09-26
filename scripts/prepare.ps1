@@ -28,7 +28,7 @@ function Get-PrivateControlFile {
     )
 
     $escapedPath = ($RelativePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
-    $uri = "https://api.github.com/repos/$Repository/contents/$escapedPath?ref=$ControlRevision"
+    $uri = 'https://api.github.com/repos/{0}/contents/{1}?ref={2}' -f $Repository, $escapedPath, $ControlRevision
     $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $Headers
 
     if ([string]$response.type -ne 'file' -or
