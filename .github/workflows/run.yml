@@ -140,8 +140,8 @@ jobs:
         if: steps.control.outputs.plugin-cache-enabled == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\dev-ci-cache\dependencies
-          key: el2-plugin-managed-runtime-${{ steps.control.outputs.managed-runtime-revision }}
+          path: ${{ runner.temp }}\dev-ci-cache\el2-managed-runtime
+          key: el2-plugin-managed-runtime-v2-${{ steps.control.outputs.managed-runtime-revision }}
 
       - name: Run validation
         if: steps.request.outputs.runnable == 'true'
