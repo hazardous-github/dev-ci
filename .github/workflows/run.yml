@@ -36,6 +36,7 @@ jobs:
           DEV_CI_INPUT_TARGET: ${{ inputs.target }}
           DEV_CI_INPUT_REVISION: ${{ inputs.revision }}
           DEV_CI_INPUT_SUITE: ${{ inputs.suite }}
+          DEV_CI_REPOSITORY_TOKEN: ${{ github.token }}
         run: |
           $harnessRoot = Join-Path $env:RUNNER_TEMP 'dev-ci-harness'
           New-Item -ItemType Directory -Force -Path $harnessRoot | Out-Null
@@ -48,16 +49,19 @@ jobs:
           }
 
           if ($env:DEV_CI_EVENT_NAME -eq 'push') {
-              $eventPayload = Get-Content -Raw -LiteralPath $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+              $headers = @{
+                  Authorization = "Bearer $env:DEV_CI_REPOSITORY_TOKEN"
+                  Accept = 'application/vnd.github+json'
+                  'X-GitHub-Api-Version' = '2022-11-28'
+              }
+              $commitUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_SHA"
+              $commit = Invoke-RestMethod -Method Get -Uri $commitUri -Headers $headers
               $requestPaths = @(
-                  foreach ($commit in @($eventPayload.commits)) {
-                      foreach ($path in @($commit.added) + @($commit.modified)) {
-                          if ([string]$path -like 'requests/*.json') {
-                              [string]$path
-                          }
-                      }
-                  }
-              ) | Sort-Object -Unique
+                  $commit.files |
+                      ForEach-Object { [string]$_.filename } |
+                      Where-Object { $_ -like 'requests/*.json' } |
+                      Sort-Object -Unique
+              )
 
               if ($requestPaths.Count -eq 0) {
                   'runnable=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -65,7 +69,7 @@ jobs:
               }
               if ($requestPaths.Count -ne 1 -or
                   $requestPaths[0] -notmatch '^requests/[A-Za-z0-9._-]+\.json$') {
-                  throw 'A CI request push must add or change exactly one valid request JSON file.'
+                  throw 'A CI request commit must add or change exactly one valid request JSON file.'
               }
 
               $requestText = (Invoke-WebRequest -Uri "$rawRoot/$($requestPaths[0])").Content
