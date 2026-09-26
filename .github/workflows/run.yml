@@ -94,15 +94,15 @@ jobs:
               -Revision '${{ steps.request.outputs.revision }}' `
               -Suite '${{ steps.request.outputs.suite }}'
 
-      - name: Restore .NET SDK
-        if: steps.request.outputs.runnable == 'true'
+      - name: Restore exact .NET SDK
+        if: steps.request.outputs.runnable == 'true' && steps.control.outputs.use-runner-dotnet != 'true'
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}\dev-ci-dotnet
           key: dev-ci-dotnet-v1-${{ runner.os }}-${{ runner.arch }}-10.0.400
 
-      - name: Set up .NET
-        if: steps.request.outputs.runnable == 'true'
+      - name: Set up exact .NET SDK
+        if: steps.request.outputs.runnable == 'true' && steps.control.outputs.use-runner-dotnet != 'true'
         uses: actions/setup-dotnet@v4
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}\dev-ci-dotnet
