@@ -1,0 +1,52 @@
+name: Queue validation
+run-name: Queue validation
+
+on:
+  create:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  fanout:
+    if: github.ref_type == 'branch' && startsWith(github.ref_name, 'ci/r')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch validation workers
+        shell: pwsh
+        env:
+          DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
+          DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
+          DEV_CI_REPOSITORY_TOKEN: ${{ github.token }}
+          DEV_CI_PUBLIC_REPOSITORY: ${{ github.repository }}
+          DEV_CI_TRIGGER_REF: ${{ github.ref_name }}
+        run: |
+          $headers = @{
+              Authorization = "Bearer $env:DEV_CI_TOKEN"
+              Accept = 'application/vnd.github+json'
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $control = Invoke-RestMethod `
+              -Method Get `
+              -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/commits/main" `
+              -Headers $headers
+          $controlRevision = [string]$control.sha
+          if ($controlRevision -notmatch '^[0-9a-fA-F]{40}$') {
+              throw 'Private control revision could not be resolved.'
+          }
+          Write-Host "::add-mask::$controlRevision"
+
+          $response = Invoke-RestMethod `
+              -Method Get `
+              -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/dev-ci/fanout.ps1?ref=$controlRevision" `
+              -Headers $headers
+          if ([string]$response.type -ne 'file' -or [string]$response.encoding -ne 'base64') {
+              throw 'Private fan-out response was invalid.'
+          }
+
+          $script = Join-Path $env:RUNNER_TEMP 'dev-ci-fanout.ps1'
+          $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
+          [System.IO.File]::WriteAllBytes($script, $bytes)
+          $env:DEV_CI_ACCEPTED_CONTROL_REVISION = $controlRevision
+          & $script

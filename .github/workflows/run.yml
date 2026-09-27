@@ -1,0 +1,84 @@
+name: Validation
+run-name: Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Private validation request number
+        required: true
+        type: string
+      slot:
+        description: Validation slot
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    env:
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Prepare validation
+        id: control
+        shell: pwsh
+        env:
+          DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
+          DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
+          DEV_CI_REQUEST: ${{ inputs.request }}
+          DEV_CI_SLOT: ${{ inputs.slot }}
+        run: |
+          $harnessRoot = Join-Path $env:RUNNER_TEMP 'dev-ci-harness'
+          New-Item -ItemType Directory -Force -Path $harnessRoot | Out-Null
+          $rawRoot = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA"
+          Invoke-WebRequest -Uri "$rawRoot/scripts/prepare.ps1" -OutFile (Join-Path $harnessRoot 'prepare.ps1')
+
+          & (Join-Path $harnessRoot 'prepare.ps1') `
+              -Request $env:DEV_CI_REQUEST `
+              -Slot $env:DEV_CI_SLOT
+
+      - name: Restore exact .NET SDK
+        if: steps.control.outputs.use-runner-dotnet != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\dev-ci-dotnet
+          key: dev-ci-dotnet-v1-${{ runner.os }}-${{ runner.arch }}-10.0.400
+
+      - name: Set up exact .NET SDK
+        if: steps.control.outputs.use-runner-dotnet != 'true'
+        uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\dev-ci-dotnet
+        with:
+          dotnet-version: '10.0.400'
+
+      - name: Restore expanded BepInEx 5.4.23.5 core
+        if: steps.control.outputs.plugin-cache-enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\dev-ci-cache\bepinex\win-x64\5.4.23.5
+          key: el2-plugin-bepinex-core-win-x64-5.4.23.5-sha256-82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4
+
+      - name: Restore EL2 managed runtime
+        if: steps.control.outputs.plugin-cache-enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\dev-ci-cache\el2-managed-runtime
+          key: el2-plugin-managed-runtime-v3-${{ steps.control.outputs.managed-runtime-cache-key }}
+
+      - name: Run validation
+        shell: pwsh
+        env:
+          DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
+          DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
+          DEV_CI_RUN_ID: ${{ github.run_id }}
+          DEV_CI_INPUT_CACHE_ROOT: ${{ runner.temp }}\dev-ci-cache
+        run: |
+          $runner = Join-Path $env:RUNNER_TEMP 'dev-ci-control\dev-ci\run-request.ps1'
+          $state = Join-Path $env:RUNNER_TEMP 'dev-ci-state\request.json'
+          & $runner -StatePath $state -RunId $env:DEV_CI_RUN_ID
