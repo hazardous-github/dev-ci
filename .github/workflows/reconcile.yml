@@ -8,8 +8,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/reconcile.yml
 
 permissions:
   contents: write
