@@ -1,0 +1,58 @@
+name: Reconcile validation requests
+run-name: Reconcile validation requests
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reconcile stale validation state
+        shell: pwsh
+        env:
+          DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
+          DEV_CI_TOKEN: ${{ secrets.DEV_CI_TOKEN }}
+          DEV_CI_REPOSITORY_TOKEN: ${{ github.token }}
+          DEV_CI_PUBLIC_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+              $headers = @{
+                  Authorization = "Bearer $env:DEV_CI_TOKEN"
+                  Accept = 'application/vnd.github+json'
+                  'X-GitHub-Api-Version' = '2022-11-28'
+              }
+              $control = Invoke-RestMethod `
+                  -Method Get `
+                  -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/commits/main" `
+                  -Headers $headers
+              $controlRevision = [string]$control.sha
+              if ($controlRevision -notmatch '^[0-9a-fA-F]{40}$') {
+                  throw 'Private control revision could not be resolved.'
+              }
+              Write-Host "::add-mask::$controlRevision"
+
+              $response = Invoke-RestMethod `
+                  -Method Get `
+                  -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/dev-ci/reconcile.ps1?ref=$controlRevision" `
+                  -Headers $headers
+              if ([string]$response.type -ne 'file' -or [string]$response.encoding -ne 'base64') {
+                  throw 'Private reconciliation response was invalid.'
+              }
+
+              $script = Join-Path $env:RUNNER_TEMP 'dev-ci-reconcile.ps1'
+              $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
+              [System.IO.File]::WriteAllBytes($script, $bytes)
+              & $script
+          }
+          catch {
+              Write-Host 'FAIL'
+              exit 1
+          }
