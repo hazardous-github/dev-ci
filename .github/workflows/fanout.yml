@@ -13,7 +13,7 @@ jobs:
     if: github.ref_type == 'branch' && startsWith(github.ref_name, 'ci/r')
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch validation workers
+      - name: Reconcile and dispatch validation workers
         shell: pwsh
         env:
           DEV_CI_CONTROL_REPOSITORY: ${{ secrets.DEV_CI_CONTROL_REPOSITORY }}
@@ -22,6 +22,7 @@ jobs:
           DEV_CI_PUBLIC_REPOSITORY: ${{ github.repository }}
           DEV_CI_TRIGGER_REF: ${{ github.ref_name }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $headers = @{
               Authorization = "Bearer $env:DEV_CI_TOKEN"
               Accept = 'application/vnd.github+json'
@@ -37,16 +38,37 @@ jobs:
           }
           Write-Host "::add-mask::$controlRevision"
 
-          $response = Invoke-RestMethod `
-              -Method Get `
-              -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/dev-ci/fanout.ps1?ref=$controlRevision" `
-              -Headers $headers
-          if ([string]$response.type -ne 'file' -or [string]$response.encoding -ne 'base64') {
-              throw 'Private fan-out response was invalid.'
+          if ($env:DEV_CI_TRIGGER_REF -notmatch '^ci/r([1-9][0-9]*)$') {
+              throw 'Public trigger ref was invalid.'
+          }
+          $requestId = [int]$Matches[1]
+
+          function Get-PrivateControlScript {
+              param(
+                  [Parameter(Mandatory = $true)][string]$Path,
+                  [Parameter(Mandatory = $true)][string]$Destination
+              )
+
+              $response = Invoke-RestMethod `
+                  -Method Get `
+                  -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/$Path?ref=$controlRevision" `
+                  -Headers $headers
+              if ([string]$response.type -ne 'file' -or [string]$response.encoding -ne 'base64') {
+                  throw 'Private control script response was invalid.'
+              }
+
+              $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
+              [System.IO.File]::WriteAllBytes($Destination, $bytes)
           }
 
-          $script = Join-Path $env:RUNNER_TEMP 'dev-ci-fanout.ps1'
-          $bytes = [Convert]::FromBase64String(([string]$response.content -replace '\s', ''))
-          [System.IO.File]::WriteAllBytes($script, $bytes)
+          $reconcileScript = Join-Path $env:RUNNER_TEMP 'dev-ci-reconcile.ps1'
+          $fanoutScript = Join-Path $env:RUNNER_TEMP 'dev-ci-fanout.ps1'
+          Get-PrivateControlScript -Path 'dev-ci/reconcile.ps1' -Destination $reconcileScript
+          Get-PrivateControlScript -Path 'dev-ci/fanout.ps1' -Destination $fanoutScript
+
+          # Reconciliation is opportunistic housekeeping. The current request is
+          # excluded explicitly, and a reconciliation defect must not block valid CI.
+          & $reconcileScript -ExcludeRequestId $requestId -NonFatal
+
           $env:DEV_CI_ACCEPTED_CONTROL_REVISION = $controlRevision
-          & $script
+          & $fanoutScript
