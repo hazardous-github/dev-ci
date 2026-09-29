@@ -51,7 +51,7 @@ jobs:
 
               $response = Invoke-RestMethod `
                   -Method Get `
-                  -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/$Path?ref=$controlRevision" `
+                  -Uri "https://api.github.com/repos/$env:DEV_CI_CONTROL_REPOSITORY/contents/${Path}?ref=$controlRevision" `
                   -Headers $headers
               if ([string]$response.type -ne 'file' -or [string]$response.encoding -ne 'base64') {
                   throw 'Private control script response was invalid.'
